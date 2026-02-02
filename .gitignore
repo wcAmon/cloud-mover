@@ -21,4 +21,12 @@ data/
 
 # uv
 .python-version
-uv.lock
+
+# Build
+dist/
+build/
+
+# Cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
