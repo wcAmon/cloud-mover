@@ -3,20 +3,20 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RegisterResponse(BaseModel):
     """Response for register endpoint."""
 
-    code: str
+    code: str = Field(min_length=6, max_length=6)
     message: str = "註冊成功，請記住您的識別碼"
 
 
 class UploadResponse(BaseModel):
     """Response for upload endpoint."""
 
-    otp: str
+    otp: str = Field(min_length=4, max_length=4)
     expires_at: datetime
     message: str = "上傳成功"
 
@@ -24,8 +24,8 @@ class UploadResponse(BaseModel):
 class DownloadRequest(BaseModel):
     """Request for download endpoint."""
 
-    code: str
-    otp: str
+    code: str = Field(min_length=6, max_length=6, pattern=r"^[a-z0-9]+$")
+    otp: str = Field(min_length=4, max_length=4, pattern=r"^[0-9]+$")
 
 
 class ErrorResponse(BaseModel):

@@ -11,24 +11,32 @@ from cloud_mover.config import settings
 from cloud_mover.models import ActionLog, Backup, User
 from cloud_mover.services.auth import generate_code, generate_otp
 
+MAX_CODE_GENERATION_ATTEMPTS = 100
+
 
 def register_user(session: Session, ip: Optional[str] = None) -> User:
     """Register a new user with generated code."""
-    # Generate unique code
-    while True:
+    # Generate unique code with max attempts
+    for _ in range(MAX_CODE_GENERATION_ATTEMPTS):
         code = generate_code()
         existing = session.exec(select(User).where(User.code == code)).first()
         if not existing:
             break
+    else:
+        raise RuntimeError("Failed to generate unique code after max attempts")
 
     user = User(code=code, created_ip=ip)
     session.add(user)
+
+    # Log action in same transaction
+    log = ActionLog(user_id=None, action="register", ip=ip)
+    session.add(log)
+
     session.commit()
     session.refresh(user)
 
-    # Log action
-    log = ActionLog(user_id=user.id, action="register", ip=ip)
-    session.add(log)
+    # Update log with user_id
+    log.user_id = user.id
     session.commit()
 
     return user
@@ -51,10 +59,10 @@ def create_backup(
     existing = session.exec(
         select(Backup).where(Backup.user_id == user.id)
     ).first()
+
+    old_file_path: Optional[str] = None
     if existing:
-        # Delete old file
-        if os.path.exists(existing.file_path):
-            os.remove(existing.file_path)
+        old_file_path = existing.file_path
         session.delete(existing)
 
     otp = generate_otp()
@@ -69,19 +77,30 @@ def create_backup(
         expires_at=expires_at,
     )
     session.add(backup)
-    session.commit()
-    session.refresh(backup)
 
-    # Log action
+    # Log action in same transaction
     log = ActionLog(
         user_id=user.id,
         action="upload",
         ip=ip,
-        backup_id=backup.id,
+        backup_id=None,
         details=json.dumps({"file_size": file_size}),
     )
     session.add(log)
+
     session.commit()
+    session.refresh(backup)
+
+    # Update log with backup_id
+    log.backup_id = backup.id
+    session.commit()
+
+    # Delete old file after successful DB commit
+    if old_file_path and os.path.exists(old_file_path):
+        try:
+            os.remove(old_file_path)
+        except OSError:
+            pass  # Best effort - file cleanup failure is non-critical
 
     return backup
 
