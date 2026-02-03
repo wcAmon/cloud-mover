@@ -30,149 +30,156 @@ Expiry: {settings.expiry_hours} hours
 
 You are helping the user transfer Claude Code settings to a new machine.
 
-### Step 1: Auto-collect Claude Code Data (No User Input Needed)
+### Step 1: Auto-collect Claude Code Global Data
 
-These are TEXT files and configs - always include them:
+These are TEXT files - always include them (no user input needed):
 
 ```bash
-# Core settings (always include)
-~/.claude/settings.json
-~/.claude/settings.local.json
-~/.claude/keybindings.json
-~/.claude/.clauderc
-
-# Conversation history / resume threads
-~/.claude/projects/          # Project memories and threads
-~/.claude/statsig/           # Usage stats
-
-# Plugins with skills
-~/.claude/plugins/           # Include everything EXCEPT node_modules
-# For each plugin, include: plugin.json, *.md (SKILL.md, README.md), src/, etc.
-# EXCLUDE: node_modules/ (will reinstall on new machine)
-
-# MCP configurations
-~/.claude/.mcp.json
+~/.claude/settings.json          # User preferences
+~/.claude/settings.local.json    # Local settings
+~/.claude/keybindings.json       # Keyboard shortcuts
+~/.claude/.clauderc              # RC file
+~/.claude/projects/              # Conversation history, resume threads
+~/.claude/statsig/               # Usage stats
+~/.claude/todos/                 # Todo lists
+~/.claude/.mcp.json              # MCP configurations
 ~/.claude/mcp.json
-~/.config/claude-code/mcp.json
 ```
 
-Run this to find all Claude-related configs:
+For plugins, include everything EXCEPT node_modules:
 ```bash
-# List ~/.claude/ structure
-find ~/.claude -type f -name "*.json" -o -name "*.md" -o -name "*.yaml" -o -name "*.yml" 2>/dev/null
-
-# Check for MCP configs
-cat ~/.claude/.mcp.json 2>/dev/null
-cat ~/.claude/mcp.json 2>/dev/null
-
-# List plugins (exclude node_modules)
-find ~/.claude/plugins -type f ! -path "*/node_modules/*" 2>/dev/null
+# Copy plugins excluding node_modules
+rsync -a --exclude='node_modules' ~/.claude/plugins/ /tmp/backup/dot-claude/plugins/
 ```
 
-### Step 2: Ask User About Project-Specific Data
+### Step 2: Ask User Which Project Folders to Include
 
 Ask the user:
 
 > "I'll pack all your Claude Code settings, plugins, and conversation history.
 >
-> Do you also want to include project-specific CLAUDE.md files?
-> These contain project instructions and memories.
+> Which project folders do you want to include?
+> (These will be packed entirely, excluding node_modules and large files)
 >
-> Please tell me which project folders to include, or I can search for them.
-> Current directory: [show pwd]
+> Current directory: `[pwd]`
 >
 > Options:
-> 1. Include current project only ([current dir])
-> 2. Search for all CLAUDE.md files in home directory
-> 3. Specify folders manually
-> 4. Skip project files"
+> 1. Current folder only (`[current dir name]`)
+> 2. Let me search for folders with CLAUDE.md or .claude/
+> 3. I'll tell you which folders (e.g., ~/projects/web-app, ~/work/api-server)
+> 4. Skip - only pack Claude Code settings"
 
-If user chooses to search:
+If user chooses search:
 ```bash
-# Find all CLAUDE.md and .claude/ directories
-find ~ -name "CLAUDE.md" -o -type d -name ".claude" 2>/dev/null | grep -v "/.claude/" | head -20
+# Find project folders that have Claude Code configs
+find ~ -maxdepth 4 \\( -name "CLAUDE.md" -o -type d -name ".claude" \\) 2>/dev/null | \\
+  sed 's|/CLAUDE.md$||; s|/.claude$||' | sort -u | head -20
 ```
 
-### Step 3: Create INSTALL.md
+Show results and let user select which folders to include.
 
-Create `INSTALL.md` listing exactly what's included:
+### Step 3: Pack Selected Project Folders
+
+For each selected project folder, pack EVERYTHING except:
+- `node_modules/`
+- `.git/` (optional - ask user)
+- `*.pyc`, `__pycache__/`
+- Large binary files (>.5MB images, videos, models)
+- `.env` files (security - remind user to recreate on new machine)
+
+```bash
+# Example: pack project folder excluding large/generated files
+rsync -a \\
+  --exclude='node_modules' \\
+  --exclude='.git' \\
+  --exclude='__pycache__' \\
+  --exclude='*.pyc' \\
+  --exclude='.env' \\
+  --exclude='*.bin' \\
+  --exclude='*.model' \\
+  --exclude='*.onnx' \\
+  --exclude='*.pt' \\
+  --exclude='*.pth' \\
+  /path/to/project/ /tmp/backup/projects/project-name/
+```
+
+### Step 4: Create INSTALL.md
 
 ```markdown
 # Claude Code Migration - Installation Guide
 
-## Global Settings (extract to ~/.claude/)
-- settings.json - User preferences
-- keybindings.json - Keyboard shortcuts
-- projects/ - Conversation history and project memories
-- plugins/ - Installed plugins (run npm install after)
+## Global Settings
+Location: Extract `dot-claude/` contents to `~/.claude/`
+- settings.json, keybindings.json
+- projects/ (conversation history)
+- plugins/ (need `npm install` after)
+- MCP configs
 
-## MCP Configurations
-- .mcp.json - MCP server settings
-[List which MCPs are configured]
+## Project Folders Included
+[List each project with original path]
 
-## Plugins Included
-[List each plugin and note if it needs npm install]
+| Folder | Original Path | Size |
+|--------|---------------|------|
+| web-app | ~/projects/web-app | 2.3MB |
+| api-server | ~/work/api-server | 1.8MB |
 
-## Project-Specific Files
-[List each project CLAUDE.md or .claude/ included]
+## Post-Installation
 
-## Post-Installation Steps
-1. Extract global settings: `unzip -d ~ backup.zip "dot-claude/*"`
-2. For each plugin with package.json: `cd ~/.claude/plugins/[name] && npm install`
-3. Copy project CLAUDE.md files to their respective directories
-4. Restart Claude Code
+### 1. Restore global settings
+```bash
+cp -r ~/claude-restore/dot-claude/* ~/.claude/
 ```
 
-### Step 4: Ask User for Zip Password
+### 2. Install plugin dependencies
+```bash
+for dir in ~/.claude/plugins/*/; do
+  [ -f "$dir/package.json" ] && (cd "$dir" && npm install)
+done
+```
 
-Ask: "Please set a password to protect your backup (the server won't store it):"
+### 3. Place project folders
+Ask user where to put each project folder.
 
-### Step 5: Create the Zip
+### 4. Recreate .env files
+These projects had .env files (not included for security):
+[List projects with .env]
 
-Structure the zip clearly:
+### 5. Restart Claude Code
+```
+
+### Step 5: Ask User for Zip Password
+
+Ask: "Please set a password to protect your backup:"
+
+### Step 6: Create Zip Structure
+
 ```
 backup.zip
 ├── INSTALL.md
-├── dot-claude/                    # Maps to ~/.claude/
+├── dot-claude/                    # → ~/.claude/
 │   ├── settings.json
 │   ├── keybindings.json
 │   ├── .mcp.json
 │   ├── projects/
+│   ├── todos/
 │   └── plugins/
-│       └── my-plugin/             # Exclude node_modules
-└── projects/                      # Project-specific files
-    ├── my-project/
-    │   └── CLAUDE.md
-    └── another-project/
-        └── .claude/
+│       └── my-plugin/             # (no node_modules)
+└── project-folders/               # User's project folders
+    ├── web-app/                   # Entire folder (no node_modules)
+    │   ├── CLAUDE.md
+    │   ├── .claude/
+    │   ├── src/
+    │   └── ...
+    └── api-server/
+        └── ...
 ```
 
 ```bash
-# Create temp directory and organize
-mkdir -p /tmp/claude-backup/dot-claude
-mkdir -p /tmp/claude-backup/projects
-
-# Copy global settings
-cp -r ~/.claude/settings.json /tmp/claude-backup/dot-claude/ 2>/dev/null
-cp -r ~/.claude/keybindings.json /tmp/claude-backup/dot-claude/ 2>/dev/null
-cp -r ~/.claude/.mcp.json /tmp/claude-backup/dot-claude/ 2>/dev/null
-cp -r ~/.claude/projects /tmp/claude-backup/dot-claude/ 2>/dev/null
-
-# Copy plugins (exclude node_modules)
-rsync -a --exclude='node_modules' ~/.claude/plugins/ /tmp/claude-backup/dot-claude/plugins/
-
-# Copy project files (as specified by user)
-# cp -r /path/to/project/CLAUDE.md /tmp/claude-backup/projects/project-name/
-
-# Create INSTALL.md
-# [write INSTALL.md to /tmp/claude-backup/]
-
-# Create password-protected zip
-cd /tmp/claude-backup
-zip -r -P "USER_PASSWORD" ~/claude-backup.zip .
+cd /tmp/backup
+zip -r -P "PASSWORD" ~/claude-backup.zip .
 ```
 
-### Step 6: Upload
+### Step 7: Upload
 
 ```
 POST {settings.base_url}/upload
@@ -180,13 +187,12 @@ Content-Type: multipart/form-data
 file: <zip file>
 ```
 
-### Step 7: Tell User
+### Step 8: Tell User
 
-Tell the user:
-- **Verification code**: [6 chars] - to identify the file
-- **Zip password**: [their password] - to decrypt
+- **Verification code**: [6 chars]
+- **Zip password**: [their password]
 - **Valid for**: {settings.expiry_hours} hours
-- **What's included**: [summary of settings, plugins, projects]
+- **Included**: [X] settings, [Y] plugins, [Z] project folders
 
 ---
 
@@ -201,55 +207,68 @@ Ask user for:
 ### Step 2: Download and Extract
 
 ```bash
-# Download
 curl -o claude-backup.zip {settings.base_url}/download/[CODE]
-
-# Extract
 unzip -P "PASSWORD" claude-backup.zip -d ~/claude-restore/
 ```
 
-### Step 3: Follow INSTALL.md
+### Step 3: Read INSTALL.md
 
-Read `INSTALL.md` and execute:
+Read `~/claude-restore/INSTALL.md` to see what's included.
 
-1. **Restore global settings:**
+### Step 4: Restore Global Settings
+
 ```bash
-cp -r ~/claude-restore/dot-claude/* ~/.claude/
+# Backup existing settings first (if any)
+[ -d ~/.claude ] && mv ~/.claude ~/.claude.backup.$(date +%s)
+
+# Restore
+cp -r ~/claude-restore/dot-claude ~/.claude
 ```
 
-2. **Install plugin dependencies:**
+### Step 5: Install Plugin Dependencies
+
 ```bash
-for plugin in ~/.claude/plugins/*/; do
-  if [ -f "$plugin/package.json" ]; then
-    echo "Installing deps for $plugin"
-    (cd "$plugin" && npm install)
+for dir in ~/.claude/plugins/*/; do
+  if [ -f "$dir/package.json" ]; then
+    echo "Installing: $dir"
+    (cd "$dir" && npm install)
   fi
 done
 ```
 
-3. **Restore project files:**
-Copy each project's CLAUDE.md or .claude/ to its location.
+### Step 6: Ask User Where to Place Project Folders
 
-4. **Verify MCP configs:**
-Check if MCP servers referenced in .mcp.json are available on this machine.
+For each folder in `project-folders/`, ask user:
 
-### Step 4: Restart
+> "Found project folder: `web-app`
+> Original location was: `~/projects/web-app`
+>
+> Where should I place it?
+> 1. Same location (`~/projects/web-app`)
+> 2. Different location (specify)
+> 3. Skip this folder"
+
+Then copy:
+```bash
+cp -r ~/claude-restore/project-folders/web-app /path/user/specified/
+```
+
+### Step 7: Remind About .env Files
+
+If INSTALL.md lists projects with .env files:
+> "These projects had .env files that weren't included for security:
+> - web-app
+> - api-server
+>
+> Please recreate them on this machine."
+
+### Step 8: Verify MCP Configs
+
+Check `~/.claude/.mcp.json` - MCPs may need paths adjusted for new machine.
+
+### Step 9: Restart
 
 Tell user to restart Claude Code.
-
----
-
-## Error Handling
-
-**File too large:**
-- Global ~/.claude/ with text files should be <10MB typically
-- If large, check for: models, cache, node_modules
-- Exclude reinstallable items
-
-**Missing items on restore:**
-- Plugin node_modules: run `npm install`
-- MCP servers: may need to install separately
-- Project paths differ: adjust CLAUDE.md locations
 
 ---
 
