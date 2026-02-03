@@ -30,80 +30,146 @@ Expiry: {settings.expiry_hours} hours
 
 You are helping the user transfer Claude Code settings to a new machine.
 
-### Step 1: Analyze ~/.claude/ Directory
+### Step 1: Auto-collect Claude Code Data (No User Input Needed)
 
-First, check what exists and calculate sizes:
+These are TEXT files and configs - always include them:
 
 ```bash
-# Check directory structure
-ls -la ~/.claude/
+# Core settings (always include)
+~/.claude/settings.json
+~/.claude/settings.local.json
+~/.claude/keybindings.json
+~/.claude/.clauderc
 
-# Calculate total size
-du -sh ~/.claude/
+# Conversation history / resume threads
+~/.claude/projects/          # Project memories and threads
+~/.claude/statsig/           # Usage stats
 
-# Check individual folder sizes
-du -sh ~/.claude/*/
+# Plugins with skills
+~/.claude/plugins/           # Include everything EXCEPT node_modules
+# For each plugin, include: plugin.json, *.md (SKILL.md, README.md), src/, etc.
+# EXCLUDE: node_modules/ (will reinstall on new machine)
+
+# MCP configurations
+~/.claude/.mcp.json
+~/.claude/mcp.json
+~/.config/claude-code/mcp.json
 ```
 
-### Step 2: Ask User What to Include
+Run this to find all Claude-related configs:
+```bash
+# List ~/.claude/ structure
+find ~/.claude -type f -name "*.json" -o -name "*.md" -o -name "*.yaml" -o -name "*.yml" 2>/dev/null
 
-Based on the analysis, ask the user what to include. Present options like:
+# Check for MCP configs
+cat ~/.claude/.mcp.json 2>/dev/null
+cat ~/.claude/mcp.json 2>/dev/null
 
-**Typical contents to migrate:**
-- `~/.claude/settings.json` - User settings (usually small)
-- `~/.claude/keybindings.json` - Keyboard shortcuts (usually small)
-- `~/.claude/plugins/` - Installed plugins (can be large)
-- `~/.claude/projects/` - Project memories (can be large)
-- `~/.claude/todos/` - Todo lists
+# List plugins (exclude node_modules)
+find ~/.claude/plugins -type f ! -path "*/node_modules/*" 2>/dev/null
+```
 
-**Often excluded (can be reinstalled or too large):**
-- AI models or large binary files
-- Cache directories
-- Temporary files
-- node_modules inside plugins (can reinstall with npm install)
+### Step 2: Ask User About Project-Specific Data
 
-If total size exceeds {settings.max_file_size_mb}MB, suggest:
-1. Exclude large items that can be reinstalled (node_modules, models)
-2. Only include essential config files
-3. Handle plugins separately (just include plugin.json, reinstall deps on new machine)
+Ask the user:
+
+> "I'll pack all your Claude Code settings, plugins, and conversation history.
+>
+> Do you also want to include project-specific CLAUDE.md files?
+> These contain project instructions and memories.
+>
+> Please tell me which project folders to include, or I can search for them.
+> Current directory: [show pwd]
+>
+> Options:
+> 1. Include current project only ([current dir])
+> 2. Search for all CLAUDE.md files in home directory
+> 3. Specify folders manually
+> 4. Skip project files"
+
+If user chooses to search:
+```bash
+# Find all CLAUDE.md and .claude/ directories
+find ~ -name "CLAUDE.md" -o -type d -name ".claude" 2>/dev/null | grep -v "/.claude/" | head -20
+```
 
 ### Step 3: Create INSTALL.md
 
-Create an `INSTALL.md` with specific instructions based on what's included:
+Create `INSTALL.md` listing exactly what's included:
 
 ```markdown
 # Claude Code Migration - Installation Guide
 
-## Contents
-[List exactly what files/folders are in this backup]
+## Global Settings (extract to ~/.claude/)
+- settings.json - User preferences
+- keybindings.json - Keyboard shortcuts
+- projects/ - Conversation history and project memories
+- plugins/ - Installed plugins (run npm install after)
 
-## Installation Steps
-1. Extract to ~/.claude/ (or specific instructions)
-2. [Any folder-specific steps]
+## MCP Configurations
+- .mcp.json - MCP server settings
+[List which MCPs are configured]
 
-## Post-Installation
-- Run `cd ~/.claude/plugins/xxx && npm install` for plugins with dependencies
-- Restart Claude Code
+## Plugins Included
+[List each plugin and note if it needs npm install]
+
+## Project-Specific Files
+[List each project CLAUDE.md or .claude/ included]
+
+## Post-Installation Steps
+1. Extract global settings: `unzip -d ~ backup.zip "dot-claude/*"`
+2. For each plugin with package.json: `cd ~/.claude/plugins/[name] && npm install`
+3. Copy project CLAUDE.md files to their respective directories
+4. Restart Claude Code
 ```
 
 ### Step 4: Ask User for Zip Password
 
-Ask the user to provide a password to protect the zip file. This password is NOT stored on the server - only the user knows it.
+Ask: "Please set a password to protect your backup (the server won't store it):"
 
-### Step 5: Create Password-Protected Zip
+### Step 5: Create the Zip
 
-Create the zip with the user's password:
-
-```bash
-# Install zip if needed (usually pre-installed)
-# Create password-protected zip
-zip -r -P "USER_PASSWORD" claude-backup.zip INSTALL.md [selected files/folders]
+Structure the zip clearly:
+```
+backup.zip
+├── INSTALL.md
+├── dot-claude/                    # Maps to ~/.claude/
+│   ├── settings.json
+│   ├── keybindings.json
+│   ├── .mcp.json
+│   ├── projects/
+│   └── plugins/
+│       └── my-plugin/             # Exclude node_modules
+└── projects/                      # Project-specific files
+    ├── my-project/
+    │   └── CLAUDE.md
+    └── another-project/
+        └── .claude/
 ```
 
-Or if using Python:
-```python
-import pyminizip
-pyminizip.compress_multiple(files, prefixes, "backup.zip", "USER_PASSWORD", 5)
+```bash
+# Create temp directory and organize
+mkdir -p /tmp/claude-backup/dot-claude
+mkdir -p /tmp/claude-backup/projects
+
+# Copy global settings
+cp -r ~/.claude/settings.json /tmp/claude-backup/dot-claude/ 2>/dev/null
+cp -r ~/.claude/keybindings.json /tmp/claude-backup/dot-claude/ 2>/dev/null
+cp -r ~/.claude/.mcp.json /tmp/claude-backup/dot-claude/ 2>/dev/null
+cp -r ~/.claude/projects /tmp/claude-backup/dot-claude/ 2>/dev/null
+
+# Copy plugins (exclude node_modules)
+rsync -a --exclude='node_modules' ~/.claude/plugins/ /tmp/claude-backup/dot-claude/plugins/
+
+# Copy project files (as specified by user)
+# cp -r /path/to/project/CLAUDE.md /tmp/claude-backup/projects/project-name/
+
+# Create INSTALL.md
+# [write INSTALL.md to /tmp/claude-backup/]
+
+# Create password-protected zip
+cd /tmp/claude-backup
+zip -r -P "USER_PASSWORD" ~/claude-backup.zip .
 ```
 
 ### Step 6: Upload
@@ -114,108 +180,92 @@ Content-Type: multipart/form-data
 file: <zip file>
 ```
 
-Response:
-```json
-{{
-  "code": "a7x9k2",
-  "expires_at": "2026-02-04T12:00:00Z",
-  "message": "Upload successful, please remember your verification code"
-}}
-```
+### Step 7: Tell User
 
-### Step 7: Tell User the Information
-
-Tell the user clearly:
-- **Verification code**: `a7x9k2` (6 characters) - for identifying the file on server
-- **Zip password**: [the one they set] - for decrypting the contents
+Tell the user:
+- **Verification code**: [6 chars] - to identify the file
+- **Zip password**: [their password] - to decrypt
 - **Valid for**: {settings.expiry_hours} hours
-
-They need BOTH to restore on the new machine.
+- **What's included**: [summary of settings, plugins, projects]
 
 ---
 
 ## Download (Target Machine)
 
-You are helping the user receive Claude Code settings from their old machine.
+### Step 1: Get Credentials
 
-### Step 1: Ask User for Credentials
+Ask user for:
+1. **Verification code** (6 alphanumeric)
+2. **Zip password**
 
-Ask the user for:
-1. **Verification code** (6 alphanumeric characters) - to find the file
-2. **Zip password** (set on old machine) - to decrypt contents
-
-### Step 2: Download
-
-```
-GET {settings.base_url}/download/{{code}}
-```
-
-Save the response as a zip file.
-
-### Step 3: Extract with Password
+### Step 2: Download and Extract
 
 ```bash
-unzip -P "USER_PASSWORD" claude-backup-xxx.zip -d ~/claude-restore/
+# Download
+curl -o claude-backup.zip {settings.base_url}/download/[CODE]
+
+# Extract
+unzip -P "PASSWORD" claude-backup.zip -d ~/claude-restore/
 ```
 
-### Step 4: Follow INSTALL.md
+### Step 3: Follow INSTALL.md
 
-Read `INSTALL.md` from the extracted files and follow instructions exactly:
-1. Copy files to correct locations
-2. Run any post-install commands (npm install for plugins, etc.)
-3. Verify permissions if needed
+Read `INSTALL.md` and execute:
 
-### Step 5: Prompt Restart
+1. **Restore global settings:**
+```bash
+cp -r ~/claude-restore/dot-claude/* ~/.claude/
+```
 
-Tell the user to restart Claude Code to apply the new settings.
+2. **Install plugin dependencies:**
+```bash
+for plugin in ~/.claude/plugins/*/; do
+  if [ -f "$plugin/package.json" ]; then
+    echo "Installing deps for $plugin"
+    (cd "$plugin" && npm install)
+  fi
+done
+```
+
+3. **Restore project files:**
+Copy each project's CLAUDE.md or .claude/ to its location.
+
+4. **Verify MCP configs:**
+Check if MCP servers referenced in .mcp.json are available on this machine.
+
+### Step 4: Restart
+
+Tell user to restart Claude Code.
 
 ---
 
 ## Error Handling
 
-**If zip creation fails due to size:**
-- Re-analyze with `du -sh` to find large items
-- Ask user which large items to exclude
-- Suggest keeping only essential configs
+**File too large:**
+- Global ~/.claude/ with text files should be <10MB typically
+- If large, check for: models, cache, node_modules
+- Exclude reinstallable items
 
-**If upload fails (file too large):**
-- Current limit is {settings.max_file_size_mb}MB
-- Help user reduce size by excluding reinstallable items
-
-**If download fails (code expired/invalid):**
-- Ask user to verify the code
-- Check if 24 hours have passed
-- May need to re-upload from source machine
+**Missing items on restore:**
+- Plugin node_modules: run `npm install`
+- MCP servers: may need to install separately
+- Project paths differ: adjust CLAUDE.md locations
 
 ---
 
 ## API Reference
 
 ### POST /upload
+Upload backup, receive verification code.
 
-Upload a backup file and receive a verification code.
+**Request:** multipart/form-data, file (max {settings.max_file_size_mb}MB)
 
-**Request:** multipart/form-data
-- `file`: zip file (max {settings.max_file_size_mb}MB)
-
-**Response:**
-```json
-{{
-  "code": "a7x9k2",
-  "expires_at": "2026-02-04T12:00:00Z",
-  "message": "Upload successful, please remember your verification code"
-}}
-```
+**Response:** `{{"code": "abc123", "expires_at": "...", "message": "..."}}`
 
 ### GET /download/{{code}}
-
-Download a backup file using the verification code.
+Download backup using code.
 
 **Response:** application/zip
-
-**Errors:**
-- 400: Invalid verification code format
-- 404: Verification code not found or expired
 """.strip()
 
 
