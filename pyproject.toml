@@ -1,7 +1,7 @@
 [project]
 name = "cloud-mover"
-version = "0.1.0"
-description = "Claude Code Migration Helper API"
+version = "0.4.0"
+description = "AI Assistant Migration & Template Sharing API"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

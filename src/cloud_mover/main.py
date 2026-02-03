@@ -50,6 +50,48 @@ This service supports migration for multiple AI assistants:
 
 ---
 
+## Template Sharing (CLAUDE.md / AGENTS.md)
+
+Share project instructions with a simple 6-character code.
+
+### If user wants to IMPORT a template
+
+User might say: "use code abc123", "import template xyz789", "download template"
+
+```bash
+# Get template info
+curl {settings.base_url}/templates/[CODE]
+
+# Download raw content
+curl {settings.base_url}/templates/[CODE]/raw -o CLAUDE.md
+```
+
+Or use the API directly and save based on `template_type` field (CLAUDE.md or AGENTS.md).
+
+### If user wants to SHARE/EXPORT a template
+
+User might say: "share my CLAUDE.md", "export this template"
+
+1. Read the current CLAUDE.md or AGENTS.md
+2. Ask user for a title and optional description
+3. POST to /templates:
+
+```bash
+curl -X POST {settings.base_url}/templates \\
+  -H "Content-Type: application/json" \\
+  -d '{{"template_type": "CLAUDE.md", "title": "...", "content": "..."}}'
+```
+
+4. Give user the 6-character code (valid for {settings.template_expiry_days} days)
+
+---
+
+## MIGRATION: Full Settings Transfer
+
+For transferring ALL settings to a new machine (not just templates).
+
+---
+
 ## UPLOAD: Tool-Specific Data Collection
 
 ### If you are Claude Code
