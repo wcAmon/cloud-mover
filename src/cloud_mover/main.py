@@ -18,7 +18,7 @@ def get_api_documentation() -> str:
     """Generate API documentation with current base_url."""
     return f"""# Cloud-Mover API
 
-Claude Code migration helper. Transfer Claude Code settings between machines.
+AI Assistant migration helper. Transfer settings between machines securely.
 
 Service URL: {settings.base_url}
 Max file size: {settings.max_file_size_mb}MB
@@ -26,71 +26,150 @@ Expiry: {settings.expiry_hours} hours
 
 ---
 
-## Upload (Source Machine)
+## Language
 
-You are helping the user transfer Claude Code settings to a new machine.
+IMPORTANT: Always communicate with the user in their primary language.
+Detect the user's language from their messages and respond in that language.
+Technical commands (bash, paths) stay in English, but all explanations,
+questions, and instructions should be in the user's language.
 
-### Step 1: Auto-collect Claude Code Global Data
+---
 
-These are TEXT files - always include them (no user input needed):
+## Supported Tools
 
+This service supports migration for multiple AI assistants:
+
+| Tool | Config Location | Detected By |
+|------|-----------------|-------------|
+| Claude Code | `~/.claude/` | You are Claude Code |
+| OpenClaw (Moltbot) | `~/.openclaw/` or `~/.moltbot/` | You are OpenClaw/Moltbot |
+| Codex | `~/.codex/` | You are Codex |
+| Other | Ask user | Unknown tool |
+
+**Identify which tool you are, then follow the corresponding section below.**
+
+---
+
+## UPLOAD: Tool-Specific Data Collection
+
+### If you are Claude Code
+
+**Auto-collect these files:**
 ```bash
-~/.claude/settings.json          # User preferences
-~/.claude/settings.local.json    # Local settings
-~/.claude/keybindings.json       # Keyboard shortcuts
-~/.claude/.clauderc              # RC file
-~/.claude/projects/              # Conversation history, resume threads
-~/.claude/statsig/               # Usage stats
-~/.claude/todos/                 # Todo lists
-~/.claude/.mcp.json              # MCP configurations
-~/.claude/mcp.json
+mkdir -p /tmp/backup/tool-config
+
+# Settings and configs
+cp ~/.claude/settings.json /tmp/backup/tool-config/ 2>/dev/null
+cp ~/.claude/settings.local.json /tmp/backup/tool-config/ 2>/dev/null
+cp ~/.claude/keybindings.json /tmp/backup/tool-config/ 2>/dev/null
+cp ~/.claude/.clauderc /tmp/backup/tool-config/ 2>/dev/null
+cp ~/.claude/.mcp.json /tmp/backup/tool-config/ 2>/dev/null
+cp ~/.claude/mcp.json /tmp/backup/tool-config/ 2>/dev/null
+
+# Directories
+cp -r ~/.claude/projects/ /tmp/backup/tool-config/ 2>/dev/null
+cp -r ~/.claude/statsig/ /tmp/backup/tool-config/ 2>/dev/null
+cp -r ~/.claude/todos/ /tmp/backup/tool-config/ 2>/dev/null
+
+# Plugins (exclude node_modules)
+rsync -a --exclude='node_modules' ~/.claude/plugins/ /tmp/backup/tool-config/plugins/ 2>/dev/null
 ```
 
-For plugins, include everything EXCEPT node_modules:
+**Restore location:** `~/.claude/`
+**Post-restore:** Run `npm install` in each plugin folder
+
+---
+
+### If you are OpenClaw (Moltbot)
+
+**Auto-collect these files:**
 ```bash
-# Copy plugins excluding node_modules
-rsync -a --exclude='node_modules' ~/.claude/plugins/ /tmp/backup/dot-claude/plugins/
+mkdir -p /tmp/backup/tool-config
+
+# Check which config exists
+if [ -d ~/.openclaw ]; then
+  CONFIG_DIR=~/.openclaw
+  CONFIG_NAME="openclaw"
+elif [ -d ~/.moltbot ]; then
+  CONFIG_DIR=~/.moltbot
+  CONFIG_NAME="moltbot"
+elif [ -d ~/.clawdbot ]; then
+  CONFIG_DIR=~/.clawdbot
+  CONFIG_NAME="clawdbot"
+fi
+
+# Copy everything
+cp "$CONFIG_DIR/$CONFIG_NAME.json" /tmp/backup/tool-config/ 2>/dev/null
+cp -r "$CONFIG_DIR/skills/" /tmp/backup/tool-config/ 2>/dev/null
+cp -r "$CONFIG_DIR/commands/" /tmp/backup/tool-config/ 2>/dev/null
+cp -r "$CONFIG_DIR/memory/" /tmp/backup/tool-config/ 2>/dev/null
+
+# Record which version for restore
+echo "$CONFIG_NAME" > /tmp/backup/tool-config/.tool-version
 ```
 
-### Step 2: Ask User Which Project Folders to Include
+**Restore location:** `~/.openclaw/` (or original location)
+**Post-restore:** Run `openclaw doctor` to verify config
+
+---
+
+### If you are Codex
+
+**Auto-collect these files:**
+```bash
+mkdir -p /tmp/backup/tool-config
+
+# Config and sessions
+cp ~/.codex/config.toml /tmp/backup/tool-config/ 2>/dev/null
+cp -r ~/.codex/sessions/ /tmp/backup/tool-config/ 2>/dev/null
+cp -r ~/.codex/profiles/ /tmp/backup/tool-config/ 2>/dev/null
+```
+
+**Restore location:** `~/.codex/`
+**Post-restore:** Verify model settings in config.toml
+
+---
+
+### If you are another AI assistant
+
+Ask the user:
+> "I can help you migrate your settings to a new machine.
+> Which folder contains your configuration? (e.g., ~/.your-tool/)"
+
+Then pack that folder:
+```bash
+mkdir -p /tmp/backup/tool-config
+cp -r ~/.your-tool/* /tmp/backup/tool-config/
+```
+
+---
+
+## UPLOAD: Project Folders (All Tools)
 
 Ask the user:
 
-> "I'll pack all your Claude Code settings, plugins, and conversation history.
->
-> Which project folders do you want to include?
-> (These will be packed entirely, excluding node_modules and large files)
->
-> Current directory: `[pwd]`
+> "Which project folders do you want to include?
+> (These will be packed entirely, excluding dependencies and large files)
 >
 > Options:
-> 1. Current folder only (`[current dir name]`)
-> 2. Let me search for folders with CLAUDE.md or .claude/
-> 3. I'll tell you which folders (e.g., ~/projects/web-app, ~/work/api-server)
-> 4. Skip - only pack Claude Code settings"
+> 1. Current folder only
+> 2. Search for project folders
+> 3. I'll specify the folders
+> 4. Skip - only pack tool settings"
 
-If user chooses search:
+**Search command (finds folders with AI assistant configs):**
 ```bash
-# Find project folders that have Claude Code configs
-find ~ -maxdepth 4 \\( -name "CLAUDE.md" -o -type d -name ".claude" \\) 2>/dev/null | \\
-  sed 's|/CLAUDE.md$||; s|/.claude$||' | sort -u | head -20
+find ~ -maxdepth 4 \\( -name "CLAUDE.md" -o -name "AGENTS.md" -o -name "codex.md" -o -type d -name ".claude" -o -type d -name ".codex" \\) 2>/dev/null | \\
+  sed 's|/CLAUDE.md$||; s|/AGENTS.md$||; s|/codex.md$||; s|/.claude$||; s|/.codex$||' | sort -u | head -20
 ```
 
-Show results and let user select which folders to include.
-
-### Step 3: Pack Selected Project Folders
-
-For each selected project folder, pack EVERYTHING except:
-- `node_modules/`
-- `.git/` (optional - ask user)
-- `*.pyc`, `__pycache__/`
-- Large binary files (>.5MB images, videos, models)
-- `.env` files (security - remind user to recreate on new machine)
-
+**Pack each selected project:**
 ```bash
-# Example: pack project folder excluding large/generated files
 rsync -a \\
   --exclude='node_modules' \\
+  --exclude='.venv' \\
+  --exclude='venv' \\
+  --exclude='env' \\
   --exclude='.git' \\
   --exclude='__pycache__' \\
   --exclude='*.pyc' \\
@@ -100,191 +179,211 @@ rsync -a \\
   --exclude='*.onnx' \\
   --exclude='*.pt' \\
   --exclude='*.pth' \\
+  --exclude='*.safetensors' \\
+  --exclude='*.gguf' \\
+  --exclude='*.mp4' \\
+  --exclude='*.mov' \\
+  --exclude='*.avi' \\
+  --exclude='*.mkv' \\
+  --exclude='dist' \\
+  --exclude='build' \\
+  --exclude='.next' \\
+  --exclude='target' \\
   /path/to/project/ /tmp/backup/projects/project-name/
 ```
 
-### Step 4: Create INSTALL.md
+---
+
+## UPLOAD: Create INSTALL.md
+
+Create `/tmp/backup/INSTALL.md`:
 
 ```markdown
-# Claude Code Migration - Installation Guide
+# Migration Installation Guide
 
-## Global Settings
-Location: Extract `dot-claude/` contents to `~/.claude/`
-- settings.json, keybindings.json
-- projects/ (conversation history)
-- plugins/ (need `npm install` after)
-- MCP configs
+## Tool
+[Your tool name]: [config location]
 
-## Project Folders Included
-[List each project with original path]
+## Restore Steps
+1. Extract to ~/restore/
+2. Copy tool-config/ to [restore location]
+3. [Tool-specific post-restore steps]
 
+## Project Folders
 | Folder | Original Path | Size |
 |--------|---------------|------|
-| web-app | ~/projects/web-app | 2.3MB |
-| api-server | ~/work/api-server | 1.8MB |
+| ... | ... | ... |
 
-## Post-Installation
+## Security Reminders
+- .env files were NOT included - recreate them
+- Review any path-dependent configs (MCP servers, etc.)
+```
 
-### 1. Restore global settings
+---
+
+## UPLOAD: Size Check
+
 ```bash
-cp -r ~/claude-restore/dot-claude/* ~/.claude/
+du -sh /tmp/backup/
 ```
 
-### 2. Install plugin dependencies
+If larger than {settings.max_file_size_mb}MB:
 ```bash
-for dir in ~/.claude/plugins/*/; do
-  [ -f "$dir/package.json" ] && (cd "$dir" && npm install)
-done
+# Find large files
+find /tmp/backup -type f -size +1M -exec ls -lh {{}} \\; | sort -k5 -hr | head -20
+
+# Size by folder
+du -sh /tmp/backup/*/ | sort -hr
 ```
 
-### 3. Place project folders
-Ask user where to put each project folder.
+**Reduce size by:**
+1. Remove non-essential project folders
+2. Add more exclusions to rsync
+3. Remove large files found above
 
-### 4. Recreate .env files
-These projects had .env files (not included for security):
-[List projects with .env]
+---
 
-### 5. Restart Claude Code
-```
+## UPLOAD: Zip and Upload
 
-### Step 5: Ask User for Zip Password
+**Ask for password:**
+> "Please set a password to protect your backup:"
 
-Ask: "Please set a password to protect your backup:"
-
-### Step 6: Create Zip Structure
-
-```
-backup.zip
-├── INSTALL.md
-├── dot-claude/                    # → ~/.claude/
-│   ├── settings.json
-│   ├── keybindings.json
-│   ├── .mcp.json
-│   ├── projects/
-│   ├── todos/
-│   └── plugins/
-│       └── my-plugin/             # (no node_modules)
-└── project-folders/               # User's project folders
-    ├── web-app/                   # Entire folder (no node_modules)
-    │   ├── CLAUDE.md
-    │   ├── .claude/
-    │   ├── src/
-    │   └── ...
-    └── api-server/
-        └── ...
-```
-
+**Create zip:**
 ```bash
 cd /tmp/backup
-zip -r -P "PASSWORD" ~/claude-backup.zip .
+zip -r -P "PASSWORD" ~/backup.zip .
 ```
 
-### Step 7: Upload
-
+**Upload:**
 ```
 POST {settings.base_url}/upload
 Content-Type: multipart/form-data
 file: <zip file>
 ```
 
-### Step 8: Tell User
-
-- **Verification code**: [6 chars]
-- **Zip password**: [their password]
-- **Valid for**: {settings.expiry_hours} hours
-- **Included**: [X] settings, [Y] plugins, [Z] project folders
+**Tell user:**
+- Verification code: [6 chars from response]
+- Zip password: [their password]
+- Valid for: {settings.expiry_hours} hours
 
 ---
 
-## Download (Target Machine)
+## DOWNLOAD: Get and Extract
 
-### Step 1: Get Credentials
+**Ask user for:**
+1. Verification code (6 alphanumeric)
+2. Zip password
 
-Ask user for:
-1. **Verification code** (6 alphanumeric)
-2. **Zip password**
-
-### Step 2: Download and Extract
-
+**Download:**
 ```bash
-curl -o claude-backup.zip {settings.base_url}/download/[CODE]
-unzip -P "PASSWORD" claude-backup.zip -d ~/claude-restore/
+curl -o backup.zip {settings.base_url}/download/[CODE]
 ```
 
-### Step 3: Read INSTALL.md
-
-Read `~/claude-restore/INSTALL.md` to see what's included.
-
-### Step 4: Restore Global Settings
-
+**Extract (Python - works on all systems):**
 ```bash
-# Backup existing settings first (if any)
+mkdir -p ~/restore
+python3 -c "import zipfile, os; zipfile.ZipFile('backup.zip').extractall(os.path.expanduser('~/restore'), pwd=b'PASSWORD')"
+```
+
+**Alternative (unzip):**
+```bash
+unzip -P "PASSWORD" backup.zip -d ~/restore/
+```
+
+If unzip not installed:
+- macOS: `brew install unzip` (or use Python above)
+- Ubuntu/Debian: `sudo apt install unzip`
+- Fedora/RHEL: `sudo dnf install unzip`
+- Arch: `sudo pacman -S unzip`
+
+---
+
+## DOWNLOAD: Restore Tool Config
+
+**Read INSTALL.md first:**
+```bash
+cat ~/restore/INSTALL.md
+```
+
+### Claude Code
+```bash
 [ -d ~/.claude ] && mv ~/.claude ~/.claude.backup.$(date +%s)
+cp -r ~/restore/tool-config ~/.claude
 
-# Restore
-cp -r ~/claude-restore/dot-claude ~/.claude
-```
-
-### Step 5: Install Plugin Dependencies
-
-```bash
+# Install plugin dependencies
 for dir in ~/.claude/plugins/*/; do
-  if [ -f "$dir/package.json" ]; then
-    echo "Installing: $dir"
-    (cd "$dir" && npm install)
-  fi
+  [ -f "$dir/package.json" ] && (cd "$dir" && npm install)
 done
 ```
 
-### Step 6: Ask User Where to Place Project Folders
-
-For each folder in `project-folders/`, ask user:
-
-> "Found project folder: `web-app`
-> Original location was: `~/projects/web-app`
->
-> Where should I place it?
-> 1. Same location (`~/projects/web-app`)
-> 2. Different location (specify)
-> 3. Skip this folder"
-
-Then copy:
+### OpenClaw (Moltbot)
 ```bash
-cp -r ~/claude-restore/project-folders/web-app /path/user/specified/
+CONFIG_NAME=$(cat ~/restore/tool-config/.tool-version 2>/dev/null || echo "openclaw")
+[ -d ~/.$CONFIG_NAME ] && mv ~/.$CONFIG_NAME ~/.$CONFIG_NAME.backup.$(date +%s)
+mkdir -p ~/.$CONFIG_NAME
+cp -r ~/restore/tool-config/* ~/.$CONFIG_NAME/
+
+# Verify
+openclaw doctor
 ```
 
-### Step 7: Remind About .env Files
+### Codex
+```bash
+[ -d ~/.codex ] && mv ~/.codex ~/.codex.backup.$(date +%s)
+cp -r ~/restore/tool-config ~/.codex
+```
 
-If INSTALL.md lists projects with .env files:
-> "These projects had .env files that weren't included for security:
-> - web-app
-> - api-server
+### Other
+Follow instructions in INSTALL.md
+
+---
+
+## DOWNLOAD: Restore Project Folders
+
+For each folder in `~/restore/projects/`:
+
+> "Found project: `[name]`
+> Original path: `[from INSTALL.md]`
 >
-> Please recreate them on this machine."
+> Where should I place it?
+> 1. Same location
+> 2. Different location
+> 3. Skip"
 
-### Step 8: Verify MCP Configs
+```bash
+cp -r ~/restore/projects/[name] /path/user/chose/
+```
 
-Check `~/.claude/.mcp.json` - MCPs may need paths adjusted for new machine.
+---
 
-### Step 9: Restart
+## DOWNLOAD: Final Steps
 
-Tell user to restart Claude Code.
+1. **Remind about .env files** - need to recreate
+2. **Check path configs** - MCP servers, project paths may need adjustment
+3. **Restart the tool** - to load new settings
 
 ---
 
 ## API Reference
 
 ### POST /upload
-Upload backup, receive verification code.
+Upload backup file, receive verification code.
 
-**Request:** multipart/form-data, file (max {settings.max_file_size_mb}MB)
+**Request:** `multipart/form-data`, field `file` (max {settings.max_file_size_mb}MB)
 
-**Response:** `{{"code": "abc123", "expires_at": "...", "message": "..."}}`
+**Response:**
+```json
+{{"code": "abc123", "expires_at": "2024-01-01T12:00:00Z", "message": "..."}}
+```
 
 ### GET /download/{{code}}
-Download backup using code.
+Download backup using verification code.
 
-**Response:** application/zip
+**Response:** `application/zip`
+
+**Errors:**
+- 404: Code not found or expired
+- 400: Invalid code format
 """.strip()
 
 
@@ -320,8 +419,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Cloud-Mover",
-    description="Claude Code Migration Helper API",
-    version="0.2.0",
+    description="AI Assistant Migration Helper API",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -330,7 +429,7 @@ app.include_router(api.router)
 
 @app.get("/", response_class=PlainTextResponse)
 def root():
-    """Return API documentation for Claude Code to read."""
+    """Return API documentation for AI assistants to read."""
     return get_api_documentation()
 
 
