@@ -1,8 +1,6 @@
 """Tests for auth service."""
 
-import pytest
-
-from cloud_mover.services.auth import generate_code, generate_otp, is_valid_code
+from cloud_mover.services.auth import generate_code, is_valid_code
 
 
 def test_generate_code_length():
@@ -24,18 +22,6 @@ def test_generate_code_unique():
     assert len(codes) == 100
 
 
-def test_generate_otp_length():
-    """Generated OTP should be 4 digits."""
-    otp = generate_otp()
-    assert len(otp) == 4
-
-
-def test_generate_otp_digits():
-    """Generated OTP should be digits only."""
-    otp = generate_otp()
-    assert otp.isdigit()
-
-
 def test_is_valid_code_correct():
     """Valid code should pass validation."""
     assert is_valid_code("abc123") is True
@@ -50,5 +36,5 @@ def test_is_valid_code_wrong_length():
 
 def test_is_valid_code_invalid_chars():
     """Code with invalid characters should fail."""
-    assert is_valid_code("ABC123") is False  # uppercase
-    assert is_valid_code("abc-12") is False  # special char
+    assert is_valid_code("ABC123") is False
+    assert is_valid_code("abc-12") is False

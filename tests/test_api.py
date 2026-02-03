@@ -29,7 +29,6 @@ def client_fixture(session: Session, tmp_path):
     """Create a test client with dependency overrides."""
     from cloud_mover import config
 
-    # Override upload directory
     original_upload_dir = config.settings.upload_dir
     config.settings.upload_dir = tmp_path / "uploads"
     config.settings.upload_dir.mkdir(parents=True, exist_ok=True)
@@ -51,101 +50,68 @@ def test_root_returns_documentation(client: TestClient):
     response = client.get("/")
     assert response.status_code == 200
     assert "Cloud-Mover API" in response.text
-    assert "POST /register" in response.text
+    assert "POST /upload" in response.text
+    assert "GET /download" in response.text
 
 
-def test_register_returns_code(client: TestClient):
-    """Register should return a 6-character code."""
-    response = client.post("/register")
+def test_upload_returns_code(client: TestClient):
+    """Upload should return a 6-character code."""
+    file_content = b"test backup content"
+    response = client.post(
+        "/upload",
+        files={"file": ("backup.zip", io.BytesIO(file_content), "application/zip")},
+    )
     assert response.status_code == 200
 
     data = response.json()
     assert "code" in data
     assert len(data["code"]) == 6
     assert data["code"].isalnum()
+    assert "expires_at" in data
 
 
-def test_upload_requires_valid_code(client: TestClient):
-    """Upload should reject invalid code format."""
-    file_content = b"test content"
+def test_upload_rejects_large_file(client: TestClient):
+    """Upload should reject files exceeding size limit."""
+    from cloud_mover import config
+
+    original_max = config.settings.max_file_size_mb
+    config.settings.max_file_size_mb = 0  # Set to 0 MB for test
+
+    file_content = b"x" * 1024  # 1KB file
     response = client.post(
         "/upload",
-        data={"code": "invalid"},
-        files={"file": ("test.zip", io.BytesIO(file_content), "application/zip")},
+        files={"file": ("backup.zip", io.BytesIO(file_content), "application/zip")},
     )
     assert response.status_code == 400
 
-
-def test_upload_requires_registered_code(client: TestClient):
-    """Upload should reject unregistered code."""
-    file_content = b"test content"
-    response = client.post(
-        "/upload",
-        data={"code": "abc123"},
-        files={"file": ("test.zip", io.BytesIO(file_content), "application/zip")},
-    )
-    assert response.status_code == 404
+    config.settings.max_file_size_mb = original_max
 
 
 def test_full_upload_download_flow(client: TestClient):
     """Test complete upload and download flow."""
-    # 1. Register
-    reg_response = client.post("/register")
-    assert reg_response.status_code == 200
-    code = reg_response.json()["code"]
-
-    # 2. Upload
     file_content = b"this is a test backup file content"
+
+    # Upload
     upload_response = client.post(
         "/upload",
-        data={"code": code},
         files={"file": ("backup.zip", io.BytesIO(file_content), "application/zip")},
     )
     assert upload_response.status_code == 200
-    otp = upload_response.json()["otp"]
-    assert len(otp) == 4
+    code = upload_response.json()["code"]
 
-    # 3. Check status
-    status_response = client.get(f"/status/{code}")
-    assert status_response.status_code == 200
-    assert status_response.json()["has_backup"] is True
-
-    # 4. Download
-    download_response = client.post(
-        "/download",
-        json={"code": code, "otp": otp},
-    )
+    # Download
+    download_response = client.get(f"/download/{code}")
     assert download_response.status_code == 200
     assert download_response.content == file_content
 
 
-def test_download_wrong_otp(client: TestClient):
-    """Download should fail with wrong OTP."""
-    # Register and upload
-    reg_response = client.post("/register")
-    code = reg_response.json()["code"]
-
-    file_content = b"test content"
-    client.post(
-        "/upload",
-        data={"code": code},
-        files={"file": ("backup.zip", io.BytesIO(file_content), "application/zip")},
-    )
-
-    # Try download with wrong OTP
-    download_response = client.post(
-        "/download",
-        json={"code": code, "otp": "0000"},
-    )
-    assert download_response.status_code == 404
+def test_download_invalid_code_format(client: TestClient):
+    """Download should reject invalid code format."""
+    response = client.get("/download/invalid")
+    assert response.status_code == 400
 
 
-def test_status_no_backup(client: TestClient):
-    """Status should return has_backup=false for user without backup."""
-    # Register but don't upload
-    reg_response = client.post("/register")
-    code = reg_response.json()["code"]
-
-    status_response = client.get(f"/status/{code}")
-    assert status_response.status_code == 200
-    assert status_response.json()["has_backup"] is False
+def test_download_nonexistent_code(client: TestClient):
+    """Download should return 404 for nonexistent code."""
+    response = client.get("/download/abc123")
+    assert response.status_code == 404
